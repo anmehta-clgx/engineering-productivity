@@ -25,7 +25,7 @@ class TeamImpactDashboard:
         logger.info("Starting Team AI Impact Index Build...")
         
         # 1. Fetch External Data
-        flow_df = load_flow_data()
+        flow_df = load_flow_data(team_filter=self.team_filter)
         jira_issues = self.jira_client.fetch_issues()
         
         if not jira_issues:

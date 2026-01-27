@@ -260,18 +260,25 @@ def process_issue_metrics(issue, team_filter=None) -> Optional[Dict]:
     }
 
 
-def load_flow_data() -> pd.DataFrame:
+def load_flow_data(team_filter: str = FIELD_TEAM_FILTER_VALUE) -> pd.DataFrame:
     """Read local CSV for Flow Metrics.
+    
+    Args:
+        team_filter: Team name to determine which CSV file to load
     
     Returns:
         DataFrame with flow survey data
     """
-    if not os.path.exists(FLOW_DATA_FILE):
-        logger.warning(f"{FLOW_DATA_FILE} not found. Returning empty DataFrame.")
+    # Construct team-specific filename
+    team_suffix = team_filter.lower()
+    flow_file = f"../flow_survey_data-{team_suffix}.csv"
+    
+    if not os.path.exists(flow_file):
+        logger.warning(f"{flow_file} not found. Returning empty DataFrame.")
         return pd.DataFrame(columns=["sprint_name", "flow_score_raw"])
     
     try:
-        df = pd.read_csv(FLOW_DATA_FILE)
+        df = pd.read_csv(flow_file)
         # Ensure columns exist and normalize string
         if "sprint_name" in df.columns:
             df["sprint_name"] = df["sprint_name"].astype(str).str.strip()

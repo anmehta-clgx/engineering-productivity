@@ -151,26 +151,26 @@ def calculate_scores(metrics_df: pd.DataFrame, flow_df: pd.DataFrame) -> pd.Data
         (dashboard['Efficiency Score'] * 0.40)
     ).round(1)
 
-    # Quality Score (15% weight) - 60% bug score + 40% rejection score
+    # Quality Score (25% weight) - 60% bug score + 40% rejection score
     dashboard['Quality Score'] = dashboard.apply(
         lambda row: (row['Bug Score'] * 0.60) + (row['Rejection Score'] * 0.40), axis=1
     ).round(1)
     
-    # Flow Score (25% weight)
+    # Flow Score (15% weight)
     dashboard['Flow Score'] = dashboard['Flow Survey Score'].apply(
         lambda x: round(min(100, max(0, x)), 1) if pd.notna(x) else None
     )
     
     # FINAL IMPACT INDEX
-    # When flow score is missing (NaN), exclude it and adjust weights: 80% velocity, 20% quality
-    # When flow score exists, use: 60% velocity, 25% flow, 15% quality
+    # When flow score is missing (NaN), exclude it and adjust weights: 70% velocity, 30% quality
+    # When flow score exists, use: 60% velocity, 15% flow, 25% quality
     def calculate_final_index(row):
         if pd.isna(row['Flow Score']):
-            # No flow data: 80% velocity, 20% quality
-            return (row['Velocity Score'] * 0.80) + (row['Quality Score'] * 0.20)
+            # No flow data: 70% velocity, 30% quality
+            return (row['Velocity Score'] * 0.70) + (row['Quality Score'] * 0.30)
         else:
-            # Has flow data: 60% velocity, 25% flow, 15% quality
-            return (row['Velocity Score'] * 0.60) + (row['Flow Score'] * 0.25) + (row['Quality Score'] * 0.15)
+            # Has flow data: 60% velocity, 15% flow, 25% quality
+            return (row['Velocity Score'] * 0.60) + (row['Flow Score'] * 0.15) + (row['Quality Score'] * 0.25)
     
     dashboard['FINAL AI IMPACT INDEX'] = dashboard.apply(calculate_final_index, axis=1).round(1)
 

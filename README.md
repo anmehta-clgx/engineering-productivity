@@ -6,8 +6,8 @@ An automated dashboard that measures and tracks team productivity and AI adoptio
 
 This tool generates an **AI Impact Index** by combining three core dimensions:
 - **Velocity** (60%): Team throughput and efficiency
-- **Flow** (25%): Team satisfaction and workflow quality from surveys
-- **Quality** (15%): Defect rejection rates
+- **Flow** (15%): Team satisfaction and workflow quality from surveys
+- **Quality** (25%): Defect rejection rates
 
 ## Methodology
 
@@ -41,7 +41,7 @@ Combines throughput and efficiency using a **median-based graded curve**:
 - Prevents gaming: doing 1 ticket fast scores low on throughput
 - Creating many small tickets is encouraged (better flow, smaller batches)
 
-#### 2. Quality Score (15% of Final Index)
+#### 2. Quality Score (25% of Final Index)
 - **What it measures**: Combined quality metric of bug creation and rejections
 - **Formula**: `(Bug Score × 60%) + (Rejection Score × 40%)`
   - **Bug Score** = max(0, 100 - (Bugs Created × 20)) — caps at 5 bugs = 0 score
@@ -51,7 +51,7 @@ Combines throughput and efficiency using a **median-based graded curve**:
 - **Why**: Prioritizes actual quality issues (bugs) while still penalizing poor testing (rejections). Bug score capped at 5 bugs based on 90th percentile across teams.
 - **Note**: Tasks excluded (auto-accepted in workflow)
 
-#### 3. Flow Score (25% of Final Index)
+#### 3. Flow Score (15% of Final Index)
 - **What it measures**: Team-reported flow state from surveys
 - **Scale**: 0-100, directly from survey responses
 - **Why**: Captures subjective experience, psychological safety, and process friction
@@ -139,9 +139,11 @@ The metrics pipeline relies on the following Jira status definitions:
   - Changelog (for cycle time calculation)
 
 ### Flow Survey Data
-- **Source**: Local CSV file (`flow_survey_data.csv`)
+- **Source**: Team-specific local CSV files (`flow_survey_data-{team}.csv`)
+  - Example: `flow_survey_data-foundation.csv`, `flow_survey_data-framework.csv`
 - **Format**: `sprint_name`, `flow_score_raw` (0-100 scale)
 - **Frequency**: Collected per sprint via team survey
+- **Note**: The appropriate CSV file is automatically selected based on the team filter parameter
 
 ## Output
 
@@ -149,8 +151,8 @@ The metrics pipeline relies on the following Jira status definitions:
 Columns in final report:
 - **Iteration Name**
 - **Velocity Score** (60% weight)
-- **Quality Score** (15% weight)
-- **Flow Score** (25% weight)
+- **Quality Score** (25% weight)
+- **Flow Score** (15% weight)
 - **Overall Score**
 
 ### Raw Data Log
@@ -198,6 +200,7 @@ python3 main.py [team_filter]
 
 **Optional Parameter:**
 - `team_filter`: Override the default team filter value from config. Example: `python3 main.py Foundation`
+  - This parameter also determines which flow survey CSV file is loaded (`flow_survey_data-{team}.csv`)
 
 If no parameter is provided, uses the `FIELD_TEAM_FILTER_VALUE` from the configuration.
 
@@ -246,7 +249,7 @@ Supports two authentication methods:
 
 1. **Throughput dominance (60%)**: Can't excel with 1 fast ticket
 2. **Median baseline**: Can't artificially lower expectations over time
-3. **Quality gate (15%)**: High rejection rate penalizes overall score
+3. **Quality gate (25%)**: High rejection rate penalizes overall score
 4. **Ticket count (not points)**: Can't inflate by changing estimates
 5. **Curve caps at 100%**: Prevents runaway scores from outliers
 
