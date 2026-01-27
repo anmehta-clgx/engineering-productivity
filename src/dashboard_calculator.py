@@ -18,16 +18,19 @@ def calculate_scores(metrics_df: pd.DataFrame, flow_df: pd.DataFrame) -> pd.Data
     Returns:
         DataFrame with aggregated dashboard scores
     """
-    # Exclude active sprint (determine the most recent sprint by date)
+    # Parse dates first
     metrics_df['Sprint Start Date'] = metrics_df['Sprint Name'].apply(_parse_sprint_date)
+    metrics_df['Created Date Parsed'] = pd.to_datetime(metrics_df['Created Date'], errors='coerce')
+    
+    # Keep unfiltered copy for bug counting (we want all bugs created by date, regardless of sprint assignment)
+    unfiltered_metrics_df = metrics_df.copy()
+    
+    # Exclude active sprint (determine the most recent sprint by date)
     if not metrics_df.empty:
         most_recent_sprint_date = metrics_df['Sprint Start Date'].max()
-        # Filter out the most recent sprint (active sprint)
+        # Filter out the most recent sprint (active sprint) for sprint-based metrics
         metrics_df = metrics_df[metrics_df['Sprint Start Date'] < most_recent_sprint_date].copy()
         logger.info(f"Excluded active sprint with start date: {most_recent_sprint_date}")
-    
-    # Parse Created Date for bug tracking
-    metrics_df['Created Date Parsed'] = pd.to_datetime(metrics_df['Created Date'], errors='coerce')
     
     # Filter for completed tickets
     done_mask = metrics_df['Status'].str.lower().isin(COMPLETION_STATUSES)
@@ -54,7 +57,8 @@ def calculate_scores(metrics_df: pd.DataFrame, flow_df: pd.DataFrame) -> pd.Data
     
     # Count bugs created during each sprint period
     # For each sprint, count bugs where created date falls within that sprint's week
-    bugs_created_per_sprint = _count_bugs_created_in_sprint_periods(metrics_df)
+    # Use unfiltered data so we count ALL bugs created by date, regardless of sprint assignment
+    bugs_created_per_sprint = _count_bugs_created_in_sprint_periods(unfiltered_metrics_df)
 
     # Merge Aggregates
     dashboard = ticket_counts.merge(sprint_velocity, on='Sprint Name', how='outer')
@@ -177,6 +181,12 @@ def calculate_scores(metrics_df: pd.DataFrame, flow_df: pd.DataFrame) -> pd.Data
     # Sort by sprint date (already calculated during filtering)
     dashboard['Sprint Start Date'] = dashboard['Sprint Name'].apply(_parse_sprint_date)
     dashboard.sort_values(by='Sprint Start Date', ascending=False, inplace=True)
+    
+    # Remove active sprint from dashboard (but its bugs were still counted for past sprints)
+    if not dashboard.empty:
+        most_recent_sprint_date = dashboard['Sprint Start Date'].max()
+        dashboard = dashboard[dashboard['Sprint Start Date'] < most_recent_sprint_date].copy()
+        logger.info(f"Removed active sprint from dashboard output")
 
     # Return final columns
     final_cols = [
