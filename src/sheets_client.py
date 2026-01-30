@@ -122,6 +122,9 @@ class SheetsClient:
             ws_dash.clear()
             ws_dash.update([simplified_dash.columns.values.tolist()] + simplified_dash.values.tolist())
             
+            # Apply red text color to cells with asterisks in Flow Score column
+            self._apply_red_asterisk_formatting(sh, ws_dash, dashboard_df)
+            
             # Apply color scale to Overall Score column (column E, index 5)
             self._apply_color_scale(sh, ws_dash, simplified_dash)
             
@@ -178,6 +181,56 @@ class SheetsClient:
         except Exception as e:
             logger.warning(f"Could not apply color scale: {e}")
     
+    def _apply_red_asterisk_formatting(self, spreadsheet, worksheet, dataframe):
+        """Apply red text color to imputed Flow Score cells.
+        
+        Args:
+            spreadsheet: gspread Spreadsheet object
+            worksheet: gspread Worksheet object
+            dataframe: DataFrame to determine which rows have imputed flow scores
+        """
+        try:
+            # Find rows with imputed flow scores
+            imputed_rows = dataframe[dataframe['Flow Score Imputed'] == True].index.tolist()
+            
+            if not imputed_rows:
+                return
+            
+            # Build requests to format cells red
+            requests = []
+            for idx in imputed_rows:
+                row_num = idx + 2  # +2 for header and 0-indexing
+                requests.append({
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": worksheet.id,
+                            "startRowIndex": row_num - 1,
+                            "endRowIndex": row_num,
+                            "startColumnIndex": 3,  # Column D (Flow Score)
+                            "endColumnIndex": 4
+                        },
+                        "cell": {
+                            "userEnteredFormat": {
+                                "textFormat": {
+                                    "foregroundColor": {
+                                        "red": 1.0,
+                                        "green": 0.0,
+                                        "blue": 0.0
+                                    }
+                                }
+                            }
+                        },
+                        "fields": "userEnteredFormat.textFormat.foregroundColor"
+                    }
+                })
+            
+            if requests:
+                spreadsheet.batch_update({"requests": requests})
+                logger.info(f"Applied red formatting to {len(imputed_rows)} imputed flow scores")
+            
+        except Exception as e:
+            logger.warning(f"Could not apply red asterisk formatting: {e}")
+    
     def _save_local_files(self, raw_df: pd.DataFrame, dashboard_df: pd.DataFrame):
         """Save dataframes to local files when Google Sheets is unavailable.
         
@@ -192,23 +245,33 @@ class SheetsClient:
             
             # Create simplified dashboard with renamed columns
             simplified_dash = dashboard_df[[
+                'Sprint Name', 'Velocity Score', 'Quality Score', 'Flow Score', 'Flow Score Imputed', 'FINAL AI IMPACT INDEX'
+            ]].copy()
+            simplified_dash_display = simplified_dash[[
                 'Sprint Name', 'Velocity Score', 'Quality Score', 'Flow Score', 'FINAL AI IMPACT INDEX'
             ]].copy()
-            simplified_dash.rename(columns={
+            simplified_dash_display.rename(columns={
                 'Sprint Name': 'Iteration Name',
                 'FINAL AI IMPACT INDEX': 'Overall Score'
             }, inplace=True)
             
             with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-                simplified_dash.to_excel(writer, sheet_name='Executive_Dashboard', index=False)
+                simplified_dash_display.to_excel(writer, sheet_name='Executive_Dashboard', index=False)
                 dashboard_df.to_excel(writer, sheet_name='Raw_Data_Log', index=False)
                 
                 # Apply color scale to Overall Score column in Executive_Dashboard
                 workbook = writer.book
                 worksheet = writer.sheets['Executive_Dashboard']
                 
+                # Apply red color to imputed Flow Score cells
+                from openpyxl.styles import Font
+                for idx in range(len(simplified_dash)):
+                    if simplified_dash.iloc[idx]['Flow Score Imputed']:
+                        cell = worksheet.cell(row=idx + 2, column=4)  # Flow Score is column D, +2 for header and 1-indexing
+                        cell.font = Font(color='FF0000')  # Red color
+                
                 # Column E (Overall Score) - apply to data rows only
-                num_rows = len(simplified_dash)
+                num_rows = len(simplified_dash_display)
                 color_scale = ColorScaleRule(
                     start_type='min', start_color='F4B4B4',  # Red
                     mid_type='percentile', mid_value=50, mid_color='FFE699',  # Yellow

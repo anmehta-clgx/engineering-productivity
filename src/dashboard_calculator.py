@@ -3,7 +3,22 @@ import logging
 import datetime
 import re
 import pandas as pd
-from config import COMPLETION_STATUSES
+from config import (
+    COMPLETION_STATUSES,
+    WEIGHT_VELOCITY,
+    WEIGHT_QUALITY,
+    WEIGHT_FLOW,
+    VELOCITY_WEIGHT_THROUGHPUT,
+    VELOCITY_WEIGHT_EFFICIENCY,
+    QUALITY_WEIGHT_BUGS,
+    QUALITY_WEIGHT_REJECTIONS,
+    MEDIAN_BASELINE_SCORE,
+    EXCELLENCE_SCORE,
+    BUG_PENALTY_PER_BUG,
+    BUG_PENALTY_CAP,
+    FLOW_DEFAULT_SCORE,
+    SPRINT_DURATION_DAYS
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,79 +119,89 @@ def calculate_scores(metrics_df: pd.DataFrame, flow_df: pd.DataFrame) -> pd.Data
     )
     dashboard['Rejection Ratio %'] = dashboard['Rejection Ratio %'].round(1)
     
-    # Bug Score (20% penalty per bug, capped at 5 bugs = 0 score)
+    # Bug Score (penalty per bug, capped at max bugs)
     dashboard['Bug Score'] = dashboard['Bugs Created'].apply(
-        lambda bugs: max(0, 100 - (bugs * 20))
+        lambda bugs: max(0, EXCELLENCE_SCORE - (min(bugs, BUG_PENALTY_CAP) * BUG_PENALTY_PER_BUG))
     ).round(1)
     
     # Rejection Score (inverse of rejection ratio)
     dashboard['Rejection Score'] = dashboard['Rejection Ratio %'].apply(
-        lambda r: max(0, 100 - r)
+        lambda r: max(0, EXCELLENCE_SCORE - r)
     ).round(1)
 
     # Merge Flow Scores from survey data
     dashboard = dashboard.merge(flow_df, left_on='Sprint Name', right_on='sprint_name', how='left')
     dashboard['Flow Survey Score'] = dashboard['flow_score_raw']
     
+    # Calculate average flow score from sprints with data
+    avg_flow_score = dashboard['Flow Survey Score'].mean()
+    
+    # If no flow data exists at all (avg is NaN), use default
+    if pd.isna(avg_flow_score):
+        avg_flow_score = FLOW_DEFAULT_SCORE
+        logger.info(f"No flow survey data found. Using default flow score of {avg_flow_score} for all sprints.")
+    else:
+        logger.info(f"Using average flow score of {avg_flow_score:.1f} for sprints without survey data.")
+    
+    # Impute missing flow scores with average and track which are imputed
+    dashboard['Flow Score Imputed'] = dashboard['Flow Survey Score'].isna()
+    dashboard['Flow Survey Score'] = dashboard['Flow Survey Score'].fillna(avg_flow_score)
+    
     # Velocity Score (60% weight) - Composite of Efficiency + Throughput
     # Calculate historical medians (excluding zero values)
     median_tickets = dashboard[dashboard['Completed Tickets'] > 0]['Completed Tickets'].median()
     median_cycle_time = dashboard[dashboard['Avg Cycle Time per Ticket'] > 0]['Avg Cycle Time per Ticket'].median()
     
-    # Throughput Score (60% of Velocity): Based on ticket count
+    # Throughput Score: Based on ticket count
     def calc_throughput_score(actual_tickets):
         if actual_tickets <= 0 or median_tickets <= 0: return 0
         if actual_tickets >= median_tickets:
-            # Above median: scale from 70% to 100%
-            score = 70 + (actual_tickets / median_tickets - 1) * 100
-            return min(100, score)
+            # Above median: scale from baseline to excellence
+            score = MEDIAN_BASELINE_SCORE + (actual_tickets / median_tickets - 1) * EXCELLENCE_SCORE
+            return min(EXCELLENCE_SCORE, score)
         else:
-            # Below median: scale proportionally down from 70%
-            return 70 * (actual_tickets / median_tickets)
+            # Below median: scale proportionally down from baseline
+            return MEDIAN_BASELINE_SCORE * (actual_tickets / median_tickets)
     
     dashboard['Throughput Score'] = dashboard['Completed Tickets'].apply(calc_throughput_score).round(1)
     
-    # Efficiency Score (40% of Velocity): Based on cycle time per ticket (inverse: lower is better)
+    # Efficiency Score: Based on cycle time per ticket (inverse: lower is better)
     def calc_efficiency_score(actual_cycle_time):
         if actual_cycle_time <= 0 or median_cycle_time <= 0: return 0
         if actual_cycle_time <= median_cycle_time:
-            # Better than median: scale from 70% to 100%
-            score = 70 + (1 - actual_cycle_time / median_cycle_time) * 100
-            return min(100, score)
+            # Better than median: scale from baseline to excellence
+            score = MEDIAN_BASELINE_SCORE + (1 - actual_cycle_time / median_cycle_time) * EXCELLENCE_SCORE
+            return min(EXCELLENCE_SCORE, score)
         else:
-            # Worse than median: scale proportionally down from 70%
-            return 70 * (median_cycle_time / actual_cycle_time)
+            # Worse than median: scale proportionally down from baseline
+            return MEDIAN_BASELINE_SCORE * (median_cycle_time / actual_cycle_time)
     
     dashboard['Efficiency Score'] = dashboard['Avg Cycle Time per Ticket'].apply(calc_efficiency_score).round(1)
     
-    # Composite Velocity Score: 60% Throughput + 40% Efficiency
+    # Composite Velocity Score: weighted combination of throughput and efficiency
     dashboard['Velocity Score'] = (
-        (dashboard['Throughput Score'] * 0.60) + 
-        (dashboard['Efficiency Score'] * 0.40)
+        (dashboard['Throughput Score'] * VELOCITY_WEIGHT_THROUGHPUT) + 
+        (dashboard['Efficiency Score'] * VELOCITY_WEIGHT_EFFICIENCY)
     ).round(1)
 
-    # Quality Score (25% weight) - 60% bug score + 40% rejection score
+    # Quality Score: weighted combination of bug score and rejection score
     dashboard['Quality Score'] = dashboard.apply(
-        lambda row: (row['Bug Score'] * 0.60) + (row['Rejection Score'] * 0.40), axis=1
+        lambda row: (row['Bug Score'] * QUALITY_WEIGHT_BUGS) + (row['Rejection Score'] * QUALITY_WEIGHT_REJECTIONS), axis=1
     ).round(1)
     
-    # Flow Score (15% weight)
+    # Flow Score: bounded between 0 and excellence score
     dashboard['Flow Score'] = dashboard['Flow Survey Score'].apply(
-        lambda x: round(min(100, max(0, x)), 1) if pd.notna(x) else None
+        lambda x: round(min(EXCELLENCE_SCORE, max(0, x)), 1) if pd.notna(x) else 0
     )
     
     # FINAL IMPACT INDEX
-    # When flow score is missing (NaN), exclude it and adjust weights: 70% velocity, 30% quality
-    # When flow score exists, use: 60% velocity, 15% flow, 25% quality
-    def calculate_final_index(row):
-        if pd.isna(row['Flow Score']):
-            # No flow data: 70% velocity, 30% quality
-            return (row['Velocity Score'] * 0.70) + (row['Quality Score'] * 0.30)
-        else:
-            # Has flow data: 60% velocity, 15% flow, 25% quality
-            return (row['Velocity Score'] * 0.60) + (row['Flow Score'] * 0.15) + (row['Quality Score'] * 0.25)
-    
-    dashboard['FINAL AI IMPACT INDEX'] = dashboard.apply(calculate_final_index, axis=1).round(1)
+    # Weighted combination of velocity, flow, and quality
+    # (Missing flow data is imputed with average, marked by Flow Score Imputed column)
+    dashboard['FINAL AI IMPACT INDEX'] = (
+        (dashboard['Velocity Score'] * WEIGHT_VELOCITY) + 
+        (dashboard['Flow Score'] * WEIGHT_FLOW) + 
+        (dashboard['Quality Score'] * WEIGHT_QUALITY)
+    ).round(1)
 
     # Sort by sprint date (already calculated during filtering)
     dashboard['Sprint Start Date'] = dashboard['Sprint Name'].apply(_parse_sprint_date)
@@ -202,6 +227,7 @@ def calculate_scores(metrics_df: pd.DataFrame, flow_df: pd.DataFrame) -> pd.Data
         "Rejection Ratio %",
         "Rejection Score",
         "Flow Survey Score",
+        "Flow Score Imputed",
         "Throughput Score",
         "Efficiency Score", 
         "Velocity Score", 
@@ -226,12 +252,12 @@ def _count_bugs_created_in_sprint_periods(metrics_df: pd.DataFrame) -> pd.DataFr
     sprints = sprints[sprints['Sprint Start Date'] != datetime.datetime.min].copy()
     sprints = sprints.sort_values('Sprint Start Date')
     
-    # Build date ranges (assume 1 week sprints - 5 business days)
+    # Build date ranges (sprint duration from config)
     sprint_ranges = []
     for _, row in sprints.iterrows():
         start_date = row['Sprint Start Date']
-        # Sprint period: start date to start date + 6 days (to cover full week including weekend)
-        end_date = start_date + datetime.timedelta(days=6)
+        # Sprint period: start date to start date + configured duration
+        end_date = start_date + datetime.timedelta(days=SPRINT_DURATION_DAYS)
         sprint_ranges.append({
             'Sprint Name': row['Sprint Name'],
             'Start': start_date,

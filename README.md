@@ -6,8 +6,10 @@ An automated dashboard that measures and tracks team productivity and AI adoptio
 
 This tool generates an **AI Impact Index** by combining three core dimensions:
 - **Velocity** (60%): Team throughput and efficiency
-- **Flow** (15%): Team satisfaction and workflow quality from surveys
 - **Quality** (25%): Defect rejection rates
+- **Flow** (15%): Team satisfaction and workflow quality from surveys
+
+> **💡 Configuration**: All scoring weights, thresholds, and parameters can be adjusted in one place: [`src/config.py`](src/config.py). See the "SCORING CONFIGURATION" section.
 
 ## Methodology
 
@@ -152,7 +154,7 @@ Columns in final report:
 - **Iteration Name**
 - **Velocity Score** (60% weight)
 - **Quality Score** (25% weight)
-- **Flow Score** (15% weight)
+- **Flow Score** (15% weight) - Imputed values shown in red
 - **Overall Score**
 
 ### Raw Data Log
@@ -181,6 +183,8 @@ pip install -r requirements.txt
 
 ## Configuration
 
+### Environment Variables
+
 Create a `.env` file:
 ```bash
 JIRA_URL=https://yourinstance.atlassian.net
@@ -189,6 +193,39 @@ JIRA_TOKEN=your-api-token
 JIRA_PROJECT_KEY=PROJ
 GOOGLE_CREDENTIALS_JSON=/path/to/credentials.json  # Optional
 ```
+
+### Scoring Parameters
+
+All scoring weights, thresholds, and parameters are centralized in [`src/config.py`](src/config.py) under the "SCORING CONFIGURATION" section:
+
+**Final Index Weights** (must sum to 100%):
+- `WEIGHT_VELOCITY`: 60% - Team throughput and efficiency
+- `WEIGHT_QUALITY`: 25% - Bug creation and rejection rates  
+- `WEIGHT_FLOW`: 15% - Team satisfaction and workflow quality
+
+**Velocity Sub-Weights** (must sum to 100%):
+- `VELOCITY_WEIGHT_THROUGHPUT`: 60% - Number of tickets completed
+- `VELOCITY_WEIGHT_EFFICIENCY`: 40% - Average cycle time per ticket
+
+**Quality Sub-Weights** (must sum to 100%):
+- `QUALITY_WEIGHT_BUGS`: 60% - Bug creation rate
+- `QUALITY_WEIGHT_REJECTIONS`: 40% - Rejection rate
+
+**Scoring Curves**:
+- `MEDIAN_BASELINE_SCORE`: 70.0 - Score for performing at team's median
+- `EXCELLENCE_SCORE`: 100.0 - Score for excellent performance
+
+**Quality Parameters**:
+- `BUG_PENALTY_PER_BUG`: 20.0 - Points deducted per bug created
+- `BUG_PENALTY_CAP`: 5 - Maximum bugs counted (5+ bugs = 0 score)
+
+**Flow Defaults**:
+- `FLOW_DEFAULT_SCORE`: 70.0 - Default when no survey data exists
+
+**Sprint Configuration**:
+- `SPRINT_DURATION_DAYS`: 6 - Days to count for bug creation period (0-6 = 7 days total)
+
+You can modify these values to adjust the scoring behavior without changing code logic.
 
 ## Usage
 
